@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang=zh>
+<head>
+    <!-- so meta -->
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <meta name="description" content="Linux TCP超时重传机制介绍背景：在工作当中遇到了下面的场景：  建立的tcp连接，在弱网环境下，经常莫名其妙的被server端给reset掉  排查了非常久，最终确定和Linux TCP超时重传有关，记录一下最近学习的Linux TCP超时机制； RFC TCP 超时重传机制整理和网络相关的所有操作，还是需要通过RFC文档来学习； TCP超时事件驱动关于TCP事件驱动中，对超时的处理逻辑见">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Linux TCP超时重传机制介绍">
+<meta property="og:url" content="http://yoursite.com/2020/07/26/tcp-retry/index.html">
+<meta property="og:site_name" content="Xiao&#39;s NoteBook">
+<meta property="og:description" content="Linux TCP超时重传机制介绍背景：在工作当中遇到了下面的场景：  建立的tcp连接，在弱网环境下，经常莫名其妙的被server端给reset掉  排查了非常久，最终确定和Linux TCP超时重传有关，记录一下最近学习的Linux TCP超时机制； RFC TCP 超时重传机制整理和网络相关的所有操作，还是需要通过RFC文档来学习； TCP超时事件驱动关于TCP事件驱动中，对超时的处理逻辑见">
+<meta property="og:locale" content="zh_CN">
+<meta property="article:published_time" content="2020-07-26T08:06:39.000Z">
+<meta property="article:modified_time" content="2020-07-26T08:07:14.237Z">
+<meta property="article:author" content="XiaoYuqi">
+<meta property="article:tag" content="tcp">
+<meta name="twitter:card" content="summary">
+    
+    
+        
+          
+              <link rel="shortcut icon" href="/images/favicon.ico">
+          
+        
+        
+          
+            <link rel="icon" type="image/png" href="/images/favicon-192x192.png" sizes="192x192">
+          
+        
+        
+          
+            <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+          
+        
+    
+    <!-- title -->
+    <title>Linux TCP超时重传机制介绍</title>
+    <!-- styles -->
+    
+<link rel="stylesheet" href="/css/style.css">
+
+    <!-- persian styles -->
+    
+      
+<link rel="stylesheet" href="/css/rtl.css">
+
+    
+    <!-- rss -->
+    
+    
+<meta name="generator" content="Hexo 4.2.1"></head>
+
+<body class="max-width mx-auto px3 ltr">
+    
+      <div id="header-post">
+  <a id="menu-icon" href="#"><i class="fas fa-bars fa-lg"></i></a>
+  <a id="menu-icon-tablet" href="#"><i class="fas fa-bars fa-lg"></i></a>
+  <a id="top-icon-tablet" href="#" onclick="$('html, body').animate({ scrollTop: 0 }, 'fast');" style="display:none;"><i class="fas fa-chevron-up fa-lg"></i></a>
+  <span id="menu">
+    <span id="nav">
+      <ul>
+         
+          <li><a href="/">首页</a></li>
+         
+          <li><a href="/about/">关于</a></li>
+         
+          <li><a href="/archives/">归档</a></li>
+         
+          <li><a href="https://github.com/YuqiXiao" target="_blank" rel="noopener">项目</a></li>
+         
+          <li><a href="/tags/">标签</a></li>
+         
+          <li><a href="/categories/">分类</a></li>
+         
+          <li><a href="/search/">搜索</a></li>
+        
+      </ul>
+    </span>
+    <br/>
+    <span id="actions">
+      <ul>
+        
+        
+        <li><a class="icon" href="/2020/07/26/go%20benchmark/"><i class="fas fa-chevron-right" aria-hidden="true" onmouseover="$('#i-next').toggle();" onmouseout="$('#i-next').toggle();"></i></a></li>
+        
+        <li><a class="icon" href="#" onclick="$('html, body').animate({ scrollTop: 0 }, 'fast');"><i class="fas fa-chevron-up" aria-hidden="true" onmouseover="$('#i-top').toggle();" onmouseout="$('#i-top').toggle();"></i></a></li>
+        <li><a class="icon" href="#"><i class="fas fa-share-alt" aria-hidden="true" onmouseover="$('#i-share').toggle();" onmouseout="$('#i-share').toggle();" onclick="$('#share').toggle();return false;"></i></a></li>
+      </ul>
+      <span id="i-prev" class="info" style="display:none;">上一篇</span>
+      <span id="i-next" class="info" style="display:none;">下一篇</span>
+      <span id="i-top" class="info" style="display:none;">返回顶部</span>
+      <span id="i-share" class="info" style="display:none;">分享文章</span>
+    </span>
+    <br/>
+    <div id="share" style="display: none">
+      <ul>
+  <li><a class="icon" href="http://www.facebook.com/sharer.php?u=http://yoursite.com/2020/07/26/tcp-retry/" target="_blank" rel="noopener"><i class="fab fa-facebook " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="https://twitter.com/share?url=http://yoursite.com/2020/07/26/tcp-retry/&text=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-twitter " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="http://www.linkedin.com/shareArticle?url=http://yoursite.com/2020/07/26/tcp-retry/&title=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-linkedin " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="https://pinterest.com/pin/create/bookmarklet/?url=http://yoursite.com/2020/07/26/tcp-retry/&is_video=false&description=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-pinterest " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="mailto:?subject=Linux TCP超时重传机制介绍&body=Check out this article: http://yoursite.com/2020/07/26/tcp-retry/"><i class="fas fa-envelope " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="https://getpocket.com/save?url=http://yoursite.com/2020/07/26/tcp-retry/&title=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-get-pocket " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="http://reddit.com/submit?url=http://yoursite.com/2020/07/26/tcp-retry/&title=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-reddit " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="http://www.stumbleupon.com/submit?url=http://yoursite.com/2020/07/26/tcp-retry/&title=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-stumbleupon " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="http://digg.com/submit?url=http://yoursite.com/2020/07/26/tcp-retry/&title=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-digg " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="http://www.tumblr.com/share/link?url=http://yoursite.com/2020/07/26/tcp-retry/&name=Linux TCP超时重传机制介绍&description=" target="_blank" rel="noopener"><i class="fab fa-tumblr " aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="https://news.ycombinator.com/submitlink?u=http://yoursite.com/2020/07/26/tcp-retry/&t=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-hacker-news " aria-hidden="true"></i></a></li>
+</ul>
+
+    </div>
+    <div id="toc">
+      <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#Linux-TCP超时重传机制介绍"><span class="toc-number">1.</span> <span class="toc-text">Linux TCP超时重传机制介绍</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#RFC-TCP-超时重传机制整理"><span class="toc-number">1.1.</span> <span class="toc-text">RFC TCP 超时重传机制整理</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#TCP超时事件驱动"><span class="toc-number">1.1.1.</span> <span class="toc-text">TCP超时事件驱动</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#User-Timeout"><span class="toc-number">1.1.2.</span> <span class="toc-text">User Timeout</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#多次重试失败后管理方式"><span class="toc-number">1.1.3.</span> <span class="toc-text">多次重试失败后管理方式</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#超时重试计时器管理方式"><span class="toc-number">1.1.4.</span> <span class="toc-text">超时重试计时器管理方式</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Linux-TCP-超时机制介绍"><span class="toc-number">1.2.</span> <span class="toc-text">Linux TCP 超时机制介绍</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Linux中关于超时判断的逻辑"><span class="toc-number">1.2.1.</span> <span class="toc-text">Linux中关于超时判断的逻辑</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#关键系统参数："><span class="toc-number">1.2.1.1.</span> <span class="toc-text">关键系统参数：</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#重传逻辑："><span class="toc-number">1.2.1.2.</span> <span class="toc-text">重传逻辑：</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Linux-TCP重传定时器的逻辑"><span class="toc-number">1.2.2.</span> <span class="toc-text">Linux TCP重传定时器的逻辑</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#附录"><span class="toc-number">1.3.</span> <span class="toc-text">附录</span></a></li></ol></li></ol>
+    </div>
+  </span>
+</div>
+
+    
+    <div class="content index py4">
+        
+        <article class="post" itemscope itemtype="http://schema.org/BlogPosting">
+  <header>
+    
+    <h1 class="posttitle" itemprop="name headline">
+        Linux TCP超时重传机制介绍
+    </h1>
+
+
+
+    <div class="meta">
+      <span class="author" itemprop="author" itemscope itemtype="http://schema.org/Person">
+        <span itemprop="name">Xiao's NoteBook</span>
+      </span>
+      
+    <div class="postdate">
+      
+        <time datetime="2020-07-26T08:06:39.000Z" itemprop="datePublished">2020-07-26</time>
+        
+      
+    </div>
+
+
+      
+    <div class="article-category">
+        <i class="fas fa-archive"></i>
+        <a class="category-link" href="/categories/%E7%BD%91%E7%BB%9C%E5%9F%BA%E7%A1%80/">网络基础</a>
+    </div>
+
+
+      
+    <div class="article-tag">
+        <i class="fas fa-tag"></i>
+        <a class="tag-link" href="/tags/tcp/" rel="tag">tcp</a>
+    </div>
+
+
+    </div>
+  </header>
+  
+
+  <div class="content" itemprop="articleBody">
+    <h1 id="Linux-TCP超时重传机制介绍"><a href="#Linux-TCP超时重传机制介绍" class="headerlink" title="Linux TCP超时重传机制介绍"></a>Linux TCP超时重传机制介绍</h1><p>背景：在工作当中遇到了下面的场景：</p>
+<ul>
+<li>建立的tcp连接，在弱网环境下，经常莫名其妙的被server端给reset掉</li>
+</ul>
+<p>排查了非常久，最终确定和<strong><em>Linux TCP超时重传</em></strong>有关，记录一下最近学习的Linux TCP超时机制；</p>
+<h2 id="RFC-TCP-超时重传机制整理"><a href="#RFC-TCP-超时重传机制整理" class="headerlink" title="RFC TCP 超时重传机制整理"></a>RFC TCP 超时重传机制整理</h2><p>和网络相关的所有操作，还是需要通过RFC文档来学习；</p>
+<h3 id="TCP超时事件驱动"><a href="#TCP超时事件驱动" class="headerlink" title="TCP超时事件驱动"></a>TCP超时事件驱动</h3><p>关于TCP事件驱动中，对超时的处理逻辑见<a href="#refer-anchor"><sup>1</sup></a>，其中提到了下面三种超时事件：</p>
+<ul>
+<li>User Timeout：超时后清空队列，切换到Close状态；</li>
+<li>Retransmission Timeout：超时后则发起重传；</li>
+<li>Time-Wait Timeout：切换到Close状态<br>其中关于User Timeout和Retransmission Timeout的详情参考2.2节和2.3节<h3 id="User-Timeout"><a href="#User-Timeout" class="headerlink" title="User Timeout"></a>User Timeout</h3>关于User Timeout设置详情见附录<a href="#refer-anchor"><sup>2</sup></a>，总结如下：  <blockquote>
+<p>The TCP user timeout controls how long transmitted data may remain unacknowledged before a connection is forcefully closed.</p>
+</blockquote>
+</li>
+</ul>
+<p><em>Note：从实际抓包效果来看，Linux实现User Timeout的方式和RFC文档中描述的相去甚远；</em></p>
+<h3 id="多次重试失败后管理方式"><a href="#多次重试失败后管理方式" class="headerlink" title="多次重试失败后管理方式"></a>多次重试失败后管理方式</h3><p>针对TCP某个数据包多次重试情况下，建议的TCP采用的管理方式见附录<a href="#refer-anchor"><sup>3</sup></a>，总结如下：</p>
+<ul>
+<li>提供R1和R2两个参数（可以对应次数或者时间）来表示不同的阈值，对应不同的操作逻辑；</li>
+<li>当重试次数/耗时超过R1后，则触发IP层的死网关探测（dead gateway diagnosis）；</li>
+<li>当重试次数/耗时超过R2后，则关闭当前TCP连接；</li>
+<li>应用程序必须为每个连接设置一个R2；</li>
+<li>关于TCP建连过程也可以参考R1/R2参数，部分处理细节存在差异； <h3 id="超时重试计时器管理方式"><a href="#超时重试计时器管理方式" class="headerlink" title="超时重试计时器管理方式"></a>超时重试计时器管理方式</h3>针对超时和重试，TCP是采用计时器的方式实现。实际的执行流程可以总结为下面几步：</li>
+<li>新建tcp连接，会启动一个RTO定时器；</li>
+<li>每次发送一个包（包括重传包），如果没有启动定时器，则启动一个当前RTO的定时器，直到超时；</li>
+<li>当所有发出的包都被确认之后，关闭当前的定时器；</li>
+<li>如果一个确认新数据包的ACK到达之后，则重置当前的定时器；</li>
+<li>当发送的包中，<em>存在未被确认的数据</em>，在定时器超时后：</li>
+<li>重传最早未被确认的包；</li>
+<li>设置RTO &lt;- RTO * 2 (“back off the timer”)</li>
+<li>按照当前RTO值重置定时器；   </li>
+<li>当超时次数超过上面的R1或者R2之后，则认为TCP连接失败，主动发起断开操作</li>
+</ul>
+<p>Note：Linux针对定时器的实现，除RTO值设置存在少许差异外，其他基本遵循上面的流程；</p>
+<p>针对TCP传输过程中，超时重试定时器的管理方式见附录<a href="#refer-anchor"><sup>4</sup></a>，总结一下定时器的要点如下：</p>
+<ul>
+<li>RTO（retransmission timeout）计算：</li>
+<li>在得到RTT之前，将RTO设置成1s；</li>
+<li>当第一个RTT计算出来之后，需要按照：  <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">SRTT &lt;- R</span><br><span class="line">RTTVAR &lt;- R&#x2F;2</span><br><span class="line">RTO &lt;- SRTT + max (G, K*RTTVAR) where K &#x3D; 4 </span><br><span class="line">当计算得到后续的RTT R’，则按照：</span><br><span class="line">RTTVAR &lt;- (1 - beta) * RTTVAR + beta * |SRTT - R&#39;|</span><br><span class="line">SRTT &lt;- (1 - alpha) * SRTT + alpha * R&#39;</span><br><span class="line">RTO &lt;- SRTT + max (G, K*RTTVAR)</span><br></pre></td></tr></table></figure></li>
+<li>当RTO不足1S的时候，RTO应该被设置成1S</li>
+</ul>
+<h2 id="Linux-TCP-超时机制介绍"><a href="#Linux-TCP-超时机制介绍" class="headerlink" title="Linux TCP 超时机制介绍"></a>Linux TCP 超时机制介绍</h2><p>Linux中关于TCP的超时重试机制可以总结成下面两点：</p>
+<ul>
+<li>介绍Linux中关于超时判断的逻辑；</li>
+<li>介绍关于Linux TCP重传定时器的逻辑；</li>
+</ul>
+<p>备注：主要参考的是三系内核</p>
+<h3 id="Linux中关于超时判断的逻辑"><a href="#Linux中关于超时判断的逻辑" class="headerlink" title="Linux中关于超时判断的逻辑"></a>Linux中关于超时判断的逻辑</h3><h4 id="关键系统参数："><a href="#关键系统参数：" class="headerlink" title="关键系统参数："></a>关键系统参数：</h4><ul>
+<li>net.ipv4.tcp_retries1，作用参考上文介绍的R1参数；</li>
+<li>net.ipv4.tcp_retries2，作用参考上文介绍的R2参数；</li>
+<li>TCP_USER_TIMEOUT，作用参考上文中介绍的User Timeout参数；  <h4 id="重传逻辑："><a href="#重传逻辑：" class="headerlink" title="重传逻辑："></a>重传逻辑：</h4></li>
+<li>数据包的第一次重传，不论超时时间多久（TCP都不会认为超时），TCP都会进行一次重传；</li>
+<li>经过一次重传的包，如果再次进入重传的逻辑，则会走到判断是否超时的逻辑:</li>
+<li>如果判断超时，则会发送RST包关闭当前的TCP连接；</li>
+<li>如果未超时，则会重传当前的数据包；</li>
+<li>超时判断逻辑：</li>
+<li>未设置TCP_USER_TIMEOUT：</li>
+<li>根据tcp_retries1计算超时，用于判断是否更新路由；</li>
+<li>根据tcp_retries2计算超时，用于判断是否关闭TCP连接；<br>超时计算逻辑：</li>
+<li>timeout = ((2 &lt;&lt; boundary) - 1) * rto_base;<br>设置了TCP_USER_TIME：</li>
+<li>将TCP_USER_TIME的值作为retries1和retries2中计算的超时时间；<br>Note：在未设置TCP_USER_TIME情况下，在retries2=5的情况下，计算的超时时间基本上10S以上；</li>
+</ul>
+<h3 id="Linux-TCP重传定时器的逻辑"><a href="#Linux-TCP重传定时器的逻辑" class="headerlink" title="Linux TCP重传定时器的逻辑"></a>Linux TCP重传定时器的逻辑</h3><p>Linux中TCP重传定时器的逻辑基本上和RFC描述的一致，部分细节存在差异：</p>
+<ul>
+<li>新建tcp连接，会开启若干个定时器，其中icsk_retransmit_timer处理超时重传；</li>
+<li>重传定时器回调函数为上文中超时函数函数；<br>重传行为：</li>
+<li>在包发送经过RTO后，如果没有收到ACK，则认为超时，走到判断是否超时的逻辑当中；</li>
+<li>如果没有超时，则重传当前数据包，同时更新RTO后重置定时器；</li>
+<li>如果超时，则直接关闭TCP连接；<br>Note：Linux对RTO不足1S的情况，并没有强制按照1S对齐；<h2 id="附录"><a href="#附录" class="headerlink" title="附录"></a>附录</h2><div id="refer-anchor"></div>  
+</li>
+</ul>
+<ol>
+<li><a href="https://tools.ietf.org/html/rfc793#section-3.9" target="_blank" rel="noopener">rfc793</a></li>
+<li><a href="https://tools.ietf.org/html/rfc5482" target="_blank" rel="noopener">rfc5482</a></li>
+<li><a href="https://tools.ietf.org/html/rfc1122#page-100" target="_blank" rel="noopener">rfc1122</a></li>
+<li><a href="https://tools.ietf.org/html/rfc6298" target="_blank" rel="noopener">rfc6298</a></li>
+</ol>
+
+  </div>
+</article>
+
+
+
+        
+          <div id="footer-post-container">
+  <div id="footer-post">
+
+    <div id="nav-footer" style="display: none">
+      <ul>
+         
+          <li><a href="/">首页</a></li>
+         
+          <li><a href="/about/">关于</a></li>
+         
+          <li><a href="/archives/">归档</a></li>
+         
+          <li><a href="https://github.com/YuqiXiao" target="_blank" rel="noopener">项目</a></li>
+         
+          <li><a href="/tags/">标签</a></li>
+         
+          <li><a href="/categories/">分类</a></li>
+         
+          <li><a href="/search/">搜索</a></li>
+        
+      </ul>
+    </div>
+
+    <div id="toc-footer" style="display: none">
+      <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#Linux-TCP超时重传机制介绍"><span class="toc-number">1.</span> <span class="toc-text">Linux TCP超时重传机制介绍</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#RFC-TCP-超时重传机制整理"><span class="toc-number">1.1.</span> <span class="toc-text">RFC TCP 超时重传机制整理</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#TCP超时事件驱动"><span class="toc-number">1.1.1.</span> <span class="toc-text">TCP超时事件驱动</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#User-Timeout"><span class="toc-number">1.1.2.</span> <span class="toc-text">User Timeout</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#多次重试失败后管理方式"><span class="toc-number">1.1.3.</span> <span class="toc-text">多次重试失败后管理方式</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#超时重试计时器管理方式"><span class="toc-number">1.1.4.</span> <span class="toc-text">超时重试计时器管理方式</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Linux-TCP-超时机制介绍"><span class="toc-number">1.2.</span> <span class="toc-text">Linux TCP 超时机制介绍</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Linux中关于超时判断的逻辑"><span class="toc-number">1.2.1.</span> <span class="toc-text">Linux中关于超时判断的逻辑</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#关键系统参数："><span class="toc-number">1.2.1.1.</span> <span class="toc-text">关键系统参数：</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#重传逻辑："><span class="toc-number">1.2.1.2.</span> <span class="toc-text">重传逻辑：</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Linux-TCP重传定时器的逻辑"><span class="toc-number">1.2.2.</span> <span class="toc-text">Linux TCP重传定时器的逻辑</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#附录"><span class="toc-number">1.3.</span> <span class="toc-text">附录</span></a></li></ol></li></ol>
+    </div>
+
+    <div id="share-footer" style="display: none">
+      <ul>
+  <li><a class="icon" href="http://www.facebook.com/sharer.php?u=http://yoursite.com/2020/07/26/tcp-retry/" target="_blank" rel="noopener"><i class="fab fa-facebook fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="https://twitter.com/share?url=http://yoursite.com/2020/07/26/tcp-retry/&text=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-twitter fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="http://www.linkedin.com/shareArticle?url=http://yoursite.com/2020/07/26/tcp-retry/&title=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-linkedin fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="https://pinterest.com/pin/create/bookmarklet/?url=http://yoursite.com/2020/07/26/tcp-retry/&is_video=false&description=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-pinterest fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="mailto:?subject=Linux TCP超时重传机制介绍&body=Check out this article: http://yoursite.com/2020/07/26/tcp-retry/"><i class="fas fa-envelope fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="https://getpocket.com/save?url=http://yoursite.com/2020/07/26/tcp-retry/&title=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-get-pocket fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="http://reddit.com/submit?url=http://yoursite.com/2020/07/26/tcp-retry/&title=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-reddit fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="http://www.stumbleupon.com/submit?url=http://yoursite.com/2020/07/26/tcp-retry/&title=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-stumbleupon fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="http://digg.com/submit?url=http://yoursite.com/2020/07/26/tcp-retry/&title=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-digg fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="http://www.tumblr.com/share/link?url=http://yoursite.com/2020/07/26/tcp-retry/&name=Linux TCP超时重传机制介绍&description=" target="_blank" rel="noopener"><i class="fab fa-tumblr fa-lg" aria-hidden="true"></i></a></li>
+  <li><a class="icon" href="https://news.ycombinator.com/submitlink?u=http://yoursite.com/2020/07/26/tcp-retry/&t=Linux TCP超时重传机制介绍" target="_blank" rel="noopener"><i class="fab fa-hacker-news fa-lg" aria-hidden="true"></i></a></li>
+</ul>
+
+    </div>
+
+    <div id="actions-footer">
+        <a id="menu" class="icon" href="#" onclick="$('#nav-footer').toggle();return false;"><i class="fas fa-bars fa-lg" aria-hidden="true"></i> 菜单</a>
+        <a id="toc" class="icon" href="#" onclick="$('#toc-footer').toggle();return false;"><i class="fas fa-list fa-lg" aria-hidden="true"></i> 目录</a>
+        <a id="share" class="icon" href="#" onclick="$('#share-footer').toggle();return false;"><i class="fas fa-share-alt fa-lg" aria-hidden="true"></i> 分享</a>
+        <a id="top" style="display:none" class="icon" href="#" onclick="$('html, body').animate({ scrollTop: 0 }, 'fast');"><i class="fas fa-chevron-up fa-lg" aria-hidden="true"></i> 返回顶部</a>
+    </div>
+
+  </div>
+</div>
+
+        
+        <footer id="footer">
+  <div class="footer-left">
+    Copyright &copy;
+    
+    
+    2016-2020
+    XiaoYuqi
+  </div>
+  <div class="footer-right">
+    <nav>
+      <ul>
+         
+          <li><a href="/">首页</a></li>
+         
+          <li><a href="/about/">关于</a></li>
+         
+          <li><a href="/archives/">归档</a></li>
+         
+          <li><a href="https://github.com/YuqiXiao" target="_blank" rel="noopener">项目</a></li>
+         
+          <li><a href="/tags/">标签</a></li>
+         
+          <li><a href="/categories/">分类</a></li>
+         
+          <li><a href="/search/">搜索</a></li>
+        
+      </ul>
+    </nav>
+  </div>
+</footer>
+
+    </div>
+    <!-- styles -->
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+
+
+<link rel="stylesheet" href="/lib/justified-gallery/css/justifiedGallery.min.css">
+
+
+    <!-- jquery -->
+
+<script src="/lib/jquery/jquery.min.js"></script>
+
+
+<script src="/lib/justified-gallery/js/jquery.justifiedGallery.min.js"></script>
+
+<!-- clipboard -->
+
+  
+<script src="/lib/clipboard/clipboard.min.js"></script>
+
+  <script type="text/javascript">
+  $(function() {
+    // copy-btn HTML
+    var btn = "<span class=\"btn-copy tooltipped tooltipped-sw\" aria-label=\"复制到粘贴板!\">";
+    btn += '<i class="far fa-clone"></i>';
+    btn += '</span>'; 
+    // mount it!
+    $(".highlight table").before(btn);
+    var clip = new ClipboardJS('.btn-copy', {
+      text: function(trigger) {
+        return Array.from(trigger.nextElementSibling.querySelectorAll('.code')).reduce((str,it)=>str+it.innerText+'\n','')
+      }
+    });
+    clip.on('success', function(e) {
+      e.trigger.setAttribute('aria-label', "复制成功!");
+      e.clearSelection();
+    })
+  })
+  </script>
+
+
+<script src="/js/main.js"></script>
+
+<!-- search -->
+
+<!-- Google Analytics -->
+
+<!-- Baidu Analytics -->
+
+<!-- Disqus Comments -->
+
+
+</body>
+</html>
