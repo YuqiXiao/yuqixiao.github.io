@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search> 
+  
+  
+    
+    <entry>
+      <title>go benchmark</title>
+      <link href="/2020/07/26/go%20benchmark/"/>
+      <url>/2020/07/26/go%20benchmark/</url>
+      
+        <content type="html"><![CDATA[<h1 id="go-benchmark"><a href="#go-benchmark" class="headerlink" title="go benchmark"></a>go benchmark</h1><h2 id="benchmark是什么"><a href="#benchmark是什么" class="headerlink" title="benchmark是什么"></a>benchmark是什么</h2><p>这里就先理解是做性能测试；</p><h2 id="主要应用场景"><a href="#主要应用场景" class="headerlink" title="主要应用场景"></a>主要应用场景</h2><p>当你优化了一个函数，但是你不知道这个函数和之前函数的性能比起来到底怎么样，这个时候benchmark就能派上用场了；</p><h2 id="go-benchmark示例"><a href="#go-benchmark示例" class="headerlink" title="go benchmark示例"></a>go benchmark示例</h2><h3 id="运行指令"><a href="#运行指令" class="headerlink" title="运行指令"></a>运行指令</h3><p><code>go test -benchmem -bench .</code></p><h3 id="指令输出"><a href="#指令输出" class="headerlink" title="指令输出"></a>指令输出</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">goos: linux</span><br><span class="line">goarch: amd64</span><br><span class="line">pkg: github.com&#x2F;bfenetworks&#x2F;bfe&#x2F;go_benchmark</span><br><span class="line">BenchmarkDecodeStdLoad-40                      1        1641440167 ns&#x2F;op        255783000 B&#x2F;op   5338128 allocs&#x2F;op</span><br><span class="line">#对应的函数 本次benchmark中运行了几次  运行的耗时 运行中消耗的内存 运行中内存分配次数</span><br></pre></td></tr></table></figure><h2 id="demo"><a href="#demo" class="headerlink" title="demo"></a>demo</h2><h3 id="正常运行"><a href="#正常运行" class="headerlink" title="正常运行"></a>正常运行</h3><p>这里面是正常运行benchmark，其中<code>ReportAllocs</code>会将操作当中的内存分配也一起给出；效果等同于运行的时候给出<code>-benchmem</code>;</p><figure class="highlight golang"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">BenchmarkDecodeStdLoad</span><span class="params">(b *testing.B)</span></span> &#123;</span><br><span class="line">b.ReportAllocs()</span><br><span class="line">bal := bfe_balance.NewBalTable(<span class="literal">nil</span>)</span><br><span class="line"><span class="keyword">for</span> i := <span class="number">0</span>; i &lt; b.N; i++ &#123;</span><br><span class="line">bal.BalTableConfLoad(<span class="string">"gslb.data"</span>, <span class="string">"cluster_table.data"</span>)</span><br><span class="line">&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure><h3 id="重置计数器"><a href="#重置计数器" class="headerlink" title="重置计数器"></a>重置计数器</h3><p>有一些特别耗时的setup操作，我们需要在setup完成之后再记录时间，这个时候就可以使用<code>ResetTimer</code>；</p><figure class="highlight golang"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">BenchmarkDecodeIterReloadLoad</span><span class="params">(b *testing.B)</span></span> &#123;</span><br><span class="line">b.ReportAllocs()</span><br><span class="line">bal := bfe_balance.NewBalTable(<span class="literal">nil</span>)</span><br><span class="line">gslbConfs, backendConfs, _ := bal.BalTableConfLoad(<span class="string">"gslb.data"</span>, <span class="string">"cluster_table.data"</span>)</span><br><span class="line">b.ResetTimer()</span><br><span class="line"><span class="keyword">for</span> i := <span class="number">0</span>; i &lt; b.N; i++ &#123;</span><br><span class="line">bal.BalTableReload(gslbConfs, backendConfs)</span><br><span class="line">&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure><h3 id="并行运行"><a href="#并行运行" class="headerlink" title="并行运行"></a>并行运行</h3><p>针对验证并行执行下的效果，可以使用<code>RunParallel</code>；</p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">func BenchmarkParallelDecodeIterLoad(b *testing.B) &#123;</span><br><span class="line">b.ReportAllocs()</span><br><span class="line">b.RunParallel(func(pb *testing.PB) &#123;</span><br><span class="line">for pb.Next() &#123;</span><br><span class="line">bal :&#x3D; bfe_balance.NewBalTable(nil)</span><br><span class="line">bal.BalTableConfLoadNew(&quot;gslb.data&quot;, &quot;cluster_table.data&quot;)</span><br><span class="line">&#125;</span><br><span class="line">&#125;)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>]]></content>
+      
+      
+      <categories>
+          
+          <category> golang </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> golang </tag>
+            
+            <tag> benchmark </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+  
+  
+</search>
